@@ -134,27 +134,25 @@ impl DoviReader {
         let mut main_buf = vec![0; 100_000];
         let mut sec_buf = vec![0; 50_000];
 
-        let mut chunk = Vec::with_capacity(chunk_size);
+        //let mut chunk = Vec::with_capacity(chunk_size);
         let mut end: Vec<u8> = Vec::with_capacity(100_000);
 
         let mut consumed = 0;
 
-        while let Ok(n) = reader.read(&mut main_buf) {
-            let mut read_bytes = n;
-            if read_bytes == 0 {
+        while let Ok(n) = reader.read(&mut main_buf[end.len()..]) {
+            let mut read_bytes = n + end.len();
+            if read_bytes == 0 || n == 0 {
                 break;
             }
 
-            if *format == Format::RawStdin {
-                chunk.extend_from_slice(&main_buf[..read_bytes]);
+            println!("{} {} {}", n, read_bytes, end.len());
 
+            let chunk = if *format == Format::RawStdin {
                 loop {
-                    match reader.read(&mut sec_buf) {
+                    match reader.read(&mut main_buf[read_bytes..]) {
                         Ok(num) => {
                             if num > 0 {
                                 read_bytes += num;
-
-                                chunk.extend_from_slice(&sec_buf[..num]);
 
                                 if read_bytes >= chunk_size {
                                     break;
@@ -166,11 +164,13 @@ impl DoviReader {
                         Err(e) => panic!("{:?}", e),
                     }
                 }
+
+                &main_buf[..read_bytes]
             } else if read_bytes < chunk_size {
-                chunk.extend_from_slice(&main_buf[..read_bytes]);
+                &main_buf[..read_bytes]
             } else {
-                chunk.extend_from_slice(&main_buf);
-            }
+                &main_buf
+            };
 
             self.offsets.clear();
             self.get_offsets(&chunk);
@@ -183,9 +183,11 @@ impl DoviReader {
                 *self.offsets.last().unwrap()
             } else {
                 let last = self.offsets.pop().unwrap();
-
-                end.clear();
-                end.extend_from_slice(&chunk[last..]);
+                
+                if !self.offsets.is_empty() {
+                    end.clear();
+                    end.extend_from_slice(&chunk[last..]);
+                }
 
                 last
             };
@@ -194,10 +196,10 @@ impl DoviReader {
             self.parse_offsets(&chunk, last);
             self.write_nalus(&chunk, dovi_writer, &self.nalus)?;
 
-            chunk.clear();
+            //chunk.clear();
 
             if !end.is_empty() {
-                chunk.extend_from_slice(&end);
+                &main_buf[..end.len()].copy_from_slice(&end);
             }
 
             consumed += read_bytes;
