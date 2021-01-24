@@ -4,7 +4,7 @@ use indicatif::ProgressBar;
 
 use super::{io, Format};
 
-use io::{DoviReader, DoviWriter};
+use io::{DoviReader, DoviWriter, WriterOptions};
 
 pub struct Demuxer {
     format: Format,
@@ -36,7 +36,13 @@ impl Demuxer {
 
     pub fn demux_raw_hevc(&self, pb: Option<&ProgressBar>, mode: Option<u8>) {
         let mut dovi_reader = DoviReader::new(mode);
-        let mut dovi_writer = DoviWriter::new(Some(&self.bl_out), Some(&self.el_out), None);
+        let writer_opts = WriterOptions {
+            bl_out: Some(self.bl_out.clone()),
+            el_out: Some(self.el_out.clone()),
+            ..Default::default()
+        };
+
+        let mut dovi_writer = DoviWriter::new(writer_opts);
 
         match dovi_reader.read_write_from_io(&self.format, &self.input, pb, &mut dovi_writer) {
             Ok(_) => (),

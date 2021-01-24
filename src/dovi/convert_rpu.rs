@@ -5,34 +5,35 @@ use indicatif::ProgressBar;
 
 use io::{DoviReader, DoviWriter, WriterOptions};
 
-pub struct RpuExtractor {
+pub struct RpuConverter {
     format: Format,
     input: PathBuf,
-    rpu_out: PathBuf,
+    output: PathBuf,
 }
 
-impl RpuExtractor {
-    pub fn new(format: Format, input: PathBuf, rpu_out: PathBuf) -> Self {
+impl RpuConverter {
+    pub fn new(format: Format, input: PathBuf, output: PathBuf) -> Self {
         Self {
             format,
             input,
-            rpu_out,
+            output,
         }
     }
 
-    pub fn process_input(&self, mode: Option<u8>) {
+    pub fn process_input(&self, mode: Option<u8>, discard_el: bool) {
         let pb = super::initialize_progress_bar(&self.format, &self.input);
 
         match self.format {
             Format::Matroska => panic!("unsupported"),
-            _ => self.extract_rpu_from_el(Some(&pb), mode),
+            _ => self.convert_rpu(Some(&pb), mode, discard_el),
         };
     }
 
-    pub fn extract_rpu_from_el(&self, pb: Option<&ProgressBar>, mode: Option<u8>) {
+    pub fn convert_rpu(&self, pb: Option<&ProgressBar>, mode: Option<u8>, discard_el: bool) {
         let mut dovi_reader = DoviReader::new(mode);
         let writer_opts = WriterOptions {
-            rpu_out: Some(self.rpu_out.clone()),
+            full_out: Some(self.output.clone()),
+            discard_el,
             ..Default::default()
         };
 

@@ -21,9 +21,20 @@ pub struct DoviReader {
 }
 
 pub struct DoviWriter {
+    options: WriterOptions,
     bl_writer: Option<BufWriter<File>>,
     el_writer: Option<BufWriter<File>>,
     rpu_writer: Option<BufWriter<File>>,
+    full_writer: Option<BufWriter<File>>,
+}
+
+#[derive(Default)]
+pub struct WriterOptions {
+    pub discard_el: bool,
+    pub bl_out: Option<PathBuf>,
+    pub el_out: Option<PathBuf>,
+    pub rpu_out: Option<PathBuf>,
+    pub full_out: Option<PathBuf>,
 }
 
 pub struct NalUnit {
@@ -32,6 +43,7 @@ pub struct NalUnit {
     end: usize,
 }
 
+#[derive(PartialEq)]
 pub enum ChunkType {
     BLChunk,
     ELChunk,
@@ -39,43 +51,50 @@ pub enum ChunkType {
 }
 
 impl DoviWriter {
-    pub fn new(
-        bl_out: Option<&PathBuf>,
-        el_out: Option<&PathBuf>,
-        rpu_out: Option<&PathBuf>,
-    ) -> DoviWriter {
+    pub fn new(options: WriterOptions) -> DoviWriter {
         let chunk_size = 100_000;
-        let bl_writer = if let Some(bl_out) = bl_out {
+        let bl_writer = if let Some(bl_out) = &options.bl_out {
             Some(BufWriter::with_capacity(
                 chunk_size,
-                File::create(bl_out).expect("Can't create file"),
+                File::create(bl_out).expect("Can't create file BL out"),
             ))
         } else {
             None
         };
 
-        let el_writer = if let Some(el_out) = el_out {
+        let el_writer = if let Some(el_out) = &options.el_out {
             Some(BufWriter::with_capacity(
                 chunk_size,
-                File::create(el_out).expect("Can't create file"),
+                File::create(el_out).expect("Can't create file EL out"),
             ))
         } else {
             None
         };
 
-        let rpu_writer = if let Some(rpu_out) = rpu_out {
+        let rpu_writer = if let Some(rpu_out) = &options.rpu_out {
             Some(BufWriter::with_capacity(
                 chunk_size,
-                File::create(rpu_out).expect("Can't create file"),
+                File::create(rpu_out).expect("Can't create file RPU out"),
+            ))
+        } else {
+            None
+        };
+
+        let full_writer = if let Some(full_out) = &options.full_out {
+            Some(BufWriter::with_capacity(
+                chunk_size,
+                File::create(full_out).expect("Can't create file FULL out"),
             ))
         } else {
             None
         };
 
         DoviWriter {
+            options,
             bl_writer,
             el_writer,
             rpu_writer,
+            full_writer,
         }
     }
 }
@@ -273,22 +292,39 @@ impl DoviReader {
         dovi_writer: &mut DoviWriter,
         nalus: &[NalUnit],
     ) -> Result<(), std::io::Error> {
+        let options = &dovi_writer.options;
+
         for nalu in nalus {
+            // Skip writing EL
+            if nalu.chunk_type == ChunkType::ELChunk && options.discard_el {
+                continue;
+            }
+
             match nalu.chunk_type {
                 ChunkType::BLChunk => {
-                    if let Some(ref mut bl_writer) = dovi_writer.bl_writer {
+                    // Write to single file or separate BL
+                    if let Some(ref mut full_writer) = dovi_writer.full_writer {
+                        full_writer.write_all(&self.out_nal_header)?;
+                        full_writer.write_all(&chunk[nalu.start..nalu.end])?;
+                    } else if let Some(ref mut bl_writer) = dovi_writer.bl_writer {
                         bl_writer.write_all(&self.out_nal_header)?;
                         bl_writer.write_all(&chunk[nalu.start..nalu.end])?;
                     }
                 }
                 ChunkType::ELChunk => {
-                    if let Some(ref mut el_writer) = dovi_writer.el_writer {
+                    // Write to single file or separate EL
+                    if let Some(ref mut full_writer) = dovi_writer.full_writer {
+                        full_writer.write_all(&self.out_nal_header)?;
+                        full_writer.write_all(&chunk[nalu.start..nalu.end])?;
+                    } else if let Some(ref mut el_writer) = dovi_writer.el_writer {
                         el_writer.write_all(&self.out_nal_header)?;
                         el_writer.write_all(&chunk[nalu.start..nalu.end])?;
                     }
                 }
                 ChunkType::RPUChunk => {
-                    if let Some(ref mut rpu_writer) = dovi_writer.rpu_writer {
+                    if let Some(ref mut full_writer) = dovi_writer.full_writer {
+                        full_writer.write_all(&self.out_nal_header)?;
+                    } else if let Some(ref mut rpu_writer) = dovi_writer.rpu_writer {
                         rpu_writer.write_all(&self.out_nal_header)?;
                     } else if let Some(ref mut el_writer) = dovi_writer.el_writer {
                         el_writer.write_all(&self.out_nal_header)?;
@@ -306,6 +342,8 @@ impl DoviReader {
                                 if let Some(ref mut rpu_writer) = dovi_writer.rpu_writer {
                                     // RPU for x265, remove 0x7C01
                                     rpu_writer.write_all(&modified_data[2..])?;
+                                } else if let Some(ref mut full_writer) = dovi_writer.full_writer {
+                                    full_writer.write_all(&modified_data)?;
                                 } else if let Some(ref mut el_writer) = dovi_writer.el_writer {
                                     el_writer.write_all(&modified_data)?;
                                 }
@@ -315,6 +353,8 @@ impl DoviReader {
                     } else if let Some(ref mut rpu_writer) = dovi_writer.rpu_writer {
                         // RPU for x265, remove 0x7C01
                         rpu_writer.write_all(&chunk[nalu.start + 2..nalu.end])?;
+                    } else if let Some(ref mut full_writer) = dovi_writer.full_writer {
+                        full_writer.write_all(&chunk[nalu.start..nalu.end])?;
                     } else if let Some(ref mut el_writer) = dovi_writer.el_writer {
                         el_writer.write_all(&chunk[nalu.start..nalu.end])?;
                     }

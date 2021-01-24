@@ -6,73 +6,10 @@ mod bits;
 use bits::{bitvec_reader, bitvec_writer};
 
 mod dovi;
-use dovi::{demuxer::Demuxer, rpu_extractor::RpuExtractor, Format};
+use dovi::{convert_rpu::RpuConverter, demuxer::Demuxer, rpu_extractor::RpuExtractor, Format};
 
-#[derive(StructOpt, Debug)]
-struct Opt {
-    #[structopt(
-        name = "mode",
-        short = "m",
-        long,
-        help = "Sets the mode for RPU processing. --help for more info",
-        long_help = "Sets the mode for RPU processing.\nMode 1: Converts the RPU to be MEL compatible\nMode 2: Converts the RPU to be profile 8.1 compatible"
-    )]
-    mode: Option<u8>,
-
-    #[structopt(subcommand)]
-    cmd: Command,
-}
-
-#[derive(StructOpt, Debug)]
-#[structopt(name = "dovi_tool", about = "Stuff about Dolby Vision")]
-enum Command {
-    Demux {
-        #[structopt(
-            name = "input",
-            short = "i",
-            long,
-            help = "Sets the input file to use",
-            conflicts_with = "stdin",
-            parse(from_os_str)
-        )]
-        input: Option<PathBuf>,
-
-        #[structopt(
-            help = "Uses stdin as input data",
-            conflicts_with = "input",
-            parse(from_os_str)
-        )]
-        stdin: Option<PathBuf>,
-
-        #[structopt(long, help = "BL output file location", parse(from_os_str))]
-        bl_out: Option<PathBuf>,
-
-        #[structopt(long, help = "EL output file location", parse(from_os_str))]
-        el_out: Option<PathBuf>,
-    },
-
-    ExtractRpu {
-        #[structopt(
-            name = "input",
-            short = "i",
-            long,
-            help = "Sets the input file to use",
-            conflicts_with = "stdin",
-            parse(from_os_str)
-        )]
-        input: Option<PathBuf>,
-
-        #[structopt(
-            help = "Uses stdin as input data",
-            conflicts_with = "input",
-            parse(from_os_str)
-        )]
-        stdin: Option<PathBuf>,
-
-        #[structopt(long, help = "RPU output file location", parse(from_os_str))]
-        rpu_out: Option<PathBuf>,
-    },
-}
+pub mod cli;
+use cli::{Command, Opt};
 
 fn main() -> std::io::Result<()> {
     let opt = Opt::from_args();
@@ -92,6 +29,14 @@ fn main() -> std::io::Result<()> {
             rpu_out,
         } => {
             extract_rpu(input, stdin, rpu_out, opt.mode);
+        }
+        Command::ConvertRpu {
+            input,
+            stdin,
+            output,
+            discard_el,
+        } => {
+            convert_rpu(input, stdin, output, opt.mode, discard_el);
         }
     }
 
@@ -179,6 +124,35 @@ fn extract_rpu(
 
             let parser = RpuExtractor::new(format, input, rpu_out);
             parser.process_input(mode);
+        }
+        Err(msg) => println!("{}", msg),
+    }
+}
+
+fn convert_rpu(
+    input: Option<PathBuf>,
+    stdin: Option<PathBuf>,
+    output: Option<PathBuf>,
+    mode: Option<u8>,
+    discard_el: bool,
+) {
+    let input = match input {
+        Some(input) => input,
+        None => match stdin {
+            Some(stdin) => stdin,
+            None => PathBuf::new(),
+        },
+    };
+
+    match input_format(&input) {
+        Ok(format) => {
+            let output = match output {
+                Some(path) => path,
+                None => PathBuf::from("ConvertedRPU.hevc"),
+            };
+
+            let parser = RpuConverter::new(format, input, output);
+            parser.process_input(mode, discard_el);
         }
         Err(msg) => println!("{}", msg),
     }

@@ -1,3 +1,4 @@
+pub mod convert_rpu;
 pub mod demuxer;
 mod io;
 pub mod rpu_extractor;
